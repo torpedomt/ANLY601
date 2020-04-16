@@ -1,0 +1,776 @@
+---
+title: "Assignment3"
+author: "Mengtong Zhang (Collaborate with Yunjia Zeng and Shaoyu Feng)"
+date: "4/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 1
+#### Part 1
+First we generate data for Part1.
+```{r}
+#generate data
+library(rpart)
+library(tidyverse)
+library(splines)
+n=300
+set.seed(1)
+u=sort(runif(n)*5*pi)
+y = sin(u)+rnorm(n)/4
+df = data.frame(x=u,y=y)
+number_of_weak_learners = 100
+number_of_knots_split = 6
+polynomial_degree = 2
+fit = rpart(y~x,data=df)
+```
+
+For Q0 and Q1, define a function called plot_fitted.
+```{r}
+plot_fitted <- function(v,fit)
+{number_of_weak_learners = 100
+yp = predict(fit,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(fit)
+for(t in 2:number_of_weak_learners){
+  # Fit linear spline
+  fit = rpart(yr~x,data=df)
+  
+  # Generate new prediction
+  yp=predict(fit,newdata=df)
+  
+  # Update residuals
+  df$yr=df$yr - v*yp
+  
+  # Bind to new data point
+  YP = cbind(YP,v*yp)
+  
+  # Store fitted model in list
+  list_of_weak_learners[[t]] = fit
+}
+
+
+##############################################
+##### Getting predictions for each boost #####
+##############################################
+for (i in 1:number_of_weak_learners){
+  # Calculating performance of first i weak_learners
+  
+  # Summing weak learner residuals
+  if(i==1){yp_i = YP[,1:i]
+  }else{yp_i=apply(YP[,1:i],1,sum) #<- strong learner
+  }
+  
+  # Binds new cols
+  col_name = paste0('yp_',i)
+  df = df %>% bind_cols(yp=yp_i)
+}
+
+df111 = df[,c(-2,-3)]
+# Re-arrange sequences to get pseudo residuals 
+plot_wl = df111 %>% 
+  pivot_longer(cols = starts_with("yp")) %>% 
+  mutate(learner = str_match(name,"[0-9]+")) %>% 
+  mutate(learner = as.integer(ifelse(is.na(learner),0,learner)))
+
+# Plot final learner
+final_learner = plot_wl %>% filter(learner == (number_of_weak_learners-1))
+
+# Plot progression of learner
+ggplot() + 
+  # Visualizing all learners
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = plot_wl,alpha=0.5) +
+  # Final learner
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = final_learner,alpha=0.5,color = 'firebrick1',size = 2)  +
+  geom_point(aes(x = x, y= y),data = df)+ # true values
+  theme_minimal()
+}
+```
+
+
+#### Q0
+
+```{r}
+plot_fitted(0.125,fit)
+```
+
+#### Q1
+v=0.125 is plotted in Q0. Here we plot for v=0.01 and v=0.05.
+```{r}
+plot_fitted(0.01,fit)
+```
+
+```{r}
+plot_fitted(0.05,fit)
+```
+
+#### Q2
+##### A&B
+My method is to measure the difference between previous RMSE and current RMSE, if the difference is less than 0.01, then make an early stop.
+```{r}
+rm(list=ls())
+n=500
+set.seed(1)
+u=sort(runif(n)*5*pi)
+y = sin(u)+rnorm(n)/4
+df = data.frame(x=u,y=y)
+idx=sample(seq_len(n), size =50)
+test <- df[idx, ]
+remain <- df[-idx,]
+df<-remain
+row.names(df) <- NULL
+valid_idx=sample(seq_len(450), size =50)
+valid<-df[valid_idx,]
+remain<-df[-valid_idx,]
+df<-remain
+row.names(df) <- NULL
+
+
+
+fit_early_stop<-function(model){
+diff = 100000000000
+t=1
+v=.05
+
+yp = predict(model,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(model)
+y_valid_p=v*predict(model,newdata=valid)
+y_rmse_valid=sqrt(mean(abs(valid$y-y_valid_p)**2)) 
+while (diff>0.01)
+{
+  t=t+1
+  fit = rpart(yr ~ x,data=df)
+  yp=predict(fit,newdata=df)
+  list_of_weak_learners[[t]] = fit
+  df$yr=df$yr - v*yp
+  YP = cbind(YP,v*yp)
+  y_valid_p=y_valid_p+v*predict(fit,newdata=valid)
+  y_rmse_valid_new=sqrt(mean(abs(valid$y-y_valid_p)**2))
+  diff=abs(y_rmse_valid_new-y_rmse_valid)
+  y_rmse_valid=y_rmse_valid_new
+  
+}
+
+t=t-1
+
+##############################################
+##### Getting predictions for each boost #####
+##############################################
+for (i in 1:t){
+  # Calculating performance of first i weak_learners
+  
+  # Summing weak learner residuals
+  if(i==1){yp_i = YP[,1:i]
+  }else{yp_i=apply(YP[,1:i],1,sum) #<- strong learner
+  }
+  # Binds new cols
+  col_name = paste0('yp_',i)
+  df = df %>% bind_cols(yp=yp_i)
+}
+df111 = df[,c(-2,-3)]
+# Re-arrange sequences to get pseudo residuals 
+plot_wl = df111 %>% 
+  pivot_longer(cols = starts_with("yp")) %>% 
+  mutate(learner = str_match(name,"[0-9]+")) %>% 
+  mutate(learner = as.integer(ifelse(is.na(learner),0,learner)))
+
+# Plot final learner
+final_learner = plot_wl %>% filter(learner == (t-1))
+
+# Plot progression of learner
+ggplot() + 
+  # Visualizing all learners
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = plot_wl,alpha=0.5) +
+  # Final learner
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = final_learner,alpha=0.5,color = 'firebrick1',size = 2)  +
+  geom_point(aes(x = x, y= y),data = df)+ # true values
+  ggtitle('Plot progression of learner with original learning paremater v=0.05')+
+  theme_minimal()
+cat('The number of trees is',t)
+return(list_of_weak_learners)}
+
+model=rpart(y~x,data=df)
+list_of_weak_learners = fit_early_stop(model)
+```
+
+
+
+
+##### C
+```{r}
+v=0.05
+t=18
+for (i in 1:18){
+  weak_learner_i = list_of_weak_learners[[i]]
+  
+  if (i==1){pred = v*predict(weak_learner_i,test)}
+  else{pred =pred + v*predict(weak_learner_i,test)}
+  
+  if(i==t){
+    test = test %>% bind_cols(yp=pred)
+  }
+}
+cat('The RMSE is',sqrt(sum((test$yp-test$y)**2))/50)
+
+```
+
+#### Q3
+In this part, I will use grid-search to tune 3 parameters: minsplit,cp and maxdepth.
+```{r}
+rm(list=ls())
+n=500
+set.seed(1)
+u=sort(runif(n)*5*pi)
+y = sin(u)+rnorm(n)/4
+df = data.frame(x=u,y=y)
+idx=sample(seq_len(n), size =50)
+test <- df[idx, ]
+remain <- df[-idx,]
+df<-remain
+row.names(df) <- NULL
+valid_idx=sample(seq_len(450), size =50)
+valid<-df[valid_idx,]
+remain<-df[-valid_idx,]
+df<-remain
+row.names(df) <- NULL
+
+fit_grid_search<-function(minsplit,cp,maxdepth){
+model=rpart(y~x,data=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+list_of_weak_learners = list(model)
+v=.05
+number_of_weak_learners = 100
+yp = predict(model,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(model)
+for(t in 2:number_of_weak_learners){
+  # Fit linear spline
+  fit = rpart(yr~x,data=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+  
+  # Generate new prediction
+  yp=predict(fit,newdata=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+  
+  # Update residuals
+  df$yr=df$yr - v*yp
+  
+  # Bind to new data point
+  YP = cbind(YP,v*yp)
+  
+  # Store fitted model in list
+  list_of_weak_learners[[t]] = fit
+}
+
+
+
+for (i in 1:t){
+  weak_learner_i = list_of_weak_learners[[i]]
+  
+  if (i==1){pred = v*predict(weak_learner_i,test)}
+  else{pred =pred + v*predict(weak_learner_i,test)}
+  
+  if(i==t){
+    test = test %>% bind_cols(yp=pred)
+  }
+}
+return(sqrt(sum((test$yp-test$y)**2)))
+
+}
+
+
+res = data.frame(minsplit = rep(0,27),cp = rep(0,27),maxdepth = rep(0,27),RMSE = rep(0,27))
+
+i=1
+for (p1 in c(5,20,50)){
+  for (p2 in c(0.1,0.01,0.001)){
+    for (p3 in c(5,10,30)){
+      res[i,] = c(p1,p2,p3,fit_grid_search(p1,p2,p3)/50)
+      i=i+1
+    }
+    
+  }
+}
+
+```
+
+```{r}
+res
+```
+
+```{r}
+cat('Best Parameters are:','\n')
+res[res$RMSE==min(res$RMSE),]
+```
+
+
+
+
+#### Part 2
+##### Q0&Q1
+```{r}
+df = read.csv('/Users/zmt/Desktop/kernel_regression_2.csv')
+colnames(df) = c('x1','x2','y')
+plot_fitted <- function(v,fit)
+{number_of_weak_learners = 100
+yp = predict(fit,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(fit)
+for(t in 2:number_of_weak_learners){
+  # Fit linear spline
+  fit = rpart(yr~x1+x2,data=df)
+  
+  # Generate new prediction
+  yp=predict(fit,newdata=df)
+  
+  # Update residuals
+  df$yr=df$yr - v*yp
+  
+  # Bind to new data point
+  YP = cbind(YP,v*yp)
+  
+  # Store fitted model in list
+  list_of_weak_learners[[t]] = fit
+}
+
+
+##############################################
+##### Getting predictions for each boost #####
+##############################################
+for (i in 1:number_of_weak_learners){
+  # Calculating performance of first i weak_learners
+  
+  # Summing weak learner residuals
+  if(i==1){yp_i = YP[,1:i]
+  }else{yp_i=apply(YP[,1:i],1,sum) #<- strong learner
+  }
+  
+  # Binds new cols
+  col_name = paste0('yp_',i)
+  df = df %>% bind_cols(yp=yp_i)
+}
+
+df111 = df[,c(-2,-3)]
+# Re-arrange sequences to get pseudo residuals 
+plot_wl = df111 %>% 
+  pivot_longer(cols = starts_with("yp")) %>% 
+  mutate(learner = str_match(name,"[0-9]+")) %>% 
+  mutate(learner = as.integer(ifelse(is.na(learner),0,learner)))
+
+# Plot final learner
+final_learner = plot_wl %>% filter(learner == (number_of_weak_learners-1))
+
+# Plot progression of learner
+ggplot() + 
+  # Visualizing all learners
+  geom_line(aes(x = x1, y = value, group = learner, color =learner),
+            data = plot_wl,alpha=0.5) +
+  # Final learner
+  geom_line(aes(x = x1, y = value, group = learner, color =learner),
+            data = final_learner,alpha=0.5,color = 'firebrick1',size = 2)  +
+  geom_point(aes(x = x1, y= y),data = df)+ # true values
+  theme_minimal()
+}
+
+model = rpart(y~x1+x2,data=df)
+plot_fitted(0.125,fit=model)
+```
+
+
+```{r}
+plot_fitted(0.01,fit=model)
+```
+
+
+```{r}
+plot_fitted(0.05,fit=model)
+```
+
+
+#### Q2
+##### A&B
+```{r}
+rm(list=ls())
+df = read.csv('/Users/zmt/Desktop/kernel_regression_2.csv')
+n=length(df[,1])
+colnames(df) = c('x1','x2','y')
+idx=sample(seq_len(n), size =50)
+test <- df[idx, ]
+remain <- df[-idx,]
+df<-remain
+row.names(df) <- NULL
+valid_idx=sample(seq_len(n-50), size =50)
+valid<-df[valid_idx,]
+remain<-df[-valid_idx,]
+df<-remain
+row.names(df) <- NULL
+fit_early_stop<-function(model){
+diff = 100000000000
+t=1
+v=.05
+
+yp = predict(model,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(model)
+y_valid_p=v*predict(model,newdata=valid)
+y_rmse_valid=sqrt(mean(abs(valid$y-y_valid_p)**2)) 
+while (diff>0.01)
+{
+  t=t+1
+  fit = rpart(yr ~ x1+x2,data=df)
+  yp=predict(fit,newdata=df)
+  list_of_weak_learners[[t]] = fit
+  df$yr=df$yr - v*yp
+  YP = cbind(YP,v*yp)
+  y_valid_p=y_valid_p+v*predict(fit,newdata=valid)
+  y_rmse_valid_new=sqrt(mean(abs(valid$y-y_valid_p)**2))
+  diff=abs(y_rmse_valid_new-y_rmse_valid)
+  y_rmse_valid=y_rmse_valid_new
+  
+}
+
+t=t-1
+
+##############################################
+##### Getting predictions for each boost #####
+##############################################
+for (i in 1:t){
+  # Calculating performance of first i weak_learners
+  
+  # Summing weak learner residuals
+  if(i==1){yp_i = YP[,1:i]
+  }else{yp_i=apply(YP[,1:i],1,sum) #<- strong learner
+  }
+  # Binds new cols
+  col_name = paste0('yp_',i)
+  df = df %>% bind_cols(yp=yp_i)
+}
+df111 = df[,c(-2,-3)]
+# Re-arrange sequences to get pseudo residuals 
+plot_wl = df111 %>% 
+  pivot_longer(cols = starts_with("yp")) %>% 
+  mutate(learner = str_match(name,"[0-9]+")) %>% 
+  mutate(learner = as.integer(ifelse(is.na(learner),0,learner)))
+
+# Plot final learner
+final_learner = plot_wl %>% filter(learner == (t-1))
+
+# Plot progression of learner
+ggplot() + 
+  # Visualizing all learners
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = plot_wl,alpha=0.5) +
+  # Final learner
+  geom_line(aes(x = x, y = value, group = learner, color =learner),
+            data = final_learner,alpha=0.5,color = 'firebrick1',size = 2)  +
+  geom_point(aes(x = x, y= y),data = df)+ # true values
+  ggtitle('Plot progression of learner with original learning paremater v=0.05')+
+  theme_minimal()
+cat('The number of trees is',t)
+return(list_of_weak_learners)}
+
+model=rpart(y~x1+x2,data=df)
+list_of_weak_learners = fit_early_stop(model)
+```
+
+
+
+
+##### C
+```{r}
+v=0.05
+t=18
+for (i in 1:18){
+  weak_learner_i = list_of_weak_learners[[i]]
+  
+  if (i==1){pred = v*predict(weak_learner_i,test)}
+  else{pred =pred + v*predict(weak_learner_i,test)}
+  
+  if(i==t){
+    test = test %>% bind_cols(yp=pred)
+  }
+}
+cat('The RMSE is',sqrt(sum((test$yp-test$y)**2))/100)
+
+```
+
+#### Q3
+
+```{r}
+fit_grid_search<-function(minsplit,cp,maxdepth){
+model=rpart(y~x1+x2,data=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+list_of_weak_learners = list(model)
+v=.05
+number_of_weak_learners = 100
+yp = predict(model,newdata=df)
+df$yr = df$y - v*yp
+YP = v*yp
+list_of_weak_learners = list(model)
+for(t in 2:number_of_weak_learners){
+  # Fit linear spline
+  fit = rpart(yr~x1+x2,data=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+  
+  # Generate new prediction
+  yp=predict(fit,newdata=df,control = rpart.control(minsplit = minsplit,cp = cp,maxdepth = maxdepth))
+  
+  # Update residuals
+  df$yr=df$yr - v*yp
+  
+  # Bind to new data point
+  YP = cbind(YP,v*yp)
+  
+  # Store fitted model in list
+  list_of_weak_learners[[t]] = fit
+}
+
+
+
+for (i in 1:t){
+  weak_learner_i = list_of_weak_learners[[i]]
+  
+  if (i==1){pred = v*predict(weak_learner_i,test)}
+  else{pred =pred + v*predict(weak_learner_i,test)}
+  
+  if(i==t){
+    test = test %>% bind_cols(yp=pred)
+  }
+}
+return(sqrt(sum((test$yp-test$y)**2))/100)
+
+}
+
+
+res = data.frame(minsplit = rep(0,27),cp = rep(0,27),maxdepth = rep(0,27),RMSE = rep(0,27))
+
+i=1
+for (p1 in c(2,5,10)){
+  for (p2 in c(0.01,0.1,0.001)){
+    for (p3 in c(5,10,30)){
+      res[i,] = c(p1,p2,p3,fit_grid_search(p1,p2,p3))
+      i=i+1
+    }
+    
+  }
+}
+```
+
+```{r}
+cat('Best Parameters are:','\n')
+res[res$RMSE==min(res$RMSE),][1,]
+```
+
+The best set is minsplit=2,cp=0.01,maxdepth=5
+
+## Question 2
+#### Part 1
+(a) Yes. Since t-SNE will maintain the local structure of data, if two points are close after mapping by t-SNE, then it indicates the short distance between those two points in original dimension.\
+(b) Perplexity is a guess about the number of close neighbors each point has and it is used to balance attention between local and global aspects of your data.\
+(c) If the number of steps is too small, then t-SNE will end before it converges. If you see a t-SNE plot with strange “pinched” shapes, chances are the process was stopped too early. Unfortunately, there’s no fixed number of steps that yields a stable result. Different data sets can require different numbers of iterations to converge.\
+(d) Sometimes you can read topological information off a t-SNE plot, but that typically requires views at multiple perplexities (multiple plots). There are two examples listed in the article. One of the simplest topological properties is containment. t-SNE with low perplexity value greatly exaggerates the size of the smaller group of points. Another is trefoil knot, low perplexity values failed to show global connectivity.
+
+#### Part 2
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(Rtsne)
+library(RColorBrewer)
+```
+
+```{r}
+# Get MNIST data
+mnist_raw <- read_csv("https://pjreddie.com/media/files/mnist_train.csv", col_names = FALSE)
+
+# What is the dimension of the data set
+dim(mnist_raw) # first column is the value, the rest are the pixels
+
+# Rearranging the data
+pixels_gathered <- mnist_raw %>% head(10000) %>%
+  rename(label = X1) %>%
+  mutate(instance = row_number()) %>%
+  gather(pixel, value, -label, -instance) %>%
+  extract(pixel, "pixel", "(\\d+)", convert = TRUE) %>%
+  mutate(pixel = pixel - 2,
+         x = pixel %% 28,
+         y = 28 - pixel %/% 28)
+
+first_10k_samples =  mnist_raw[1:10000,-1] #%>% as.matrix()
+first_10k_samples_labels =  mnist_raw[1:10000,1] %>% unlist(use.names=F)
+colors = brewer.pal(10, 'Spectral')
+```
+```{r}
+# Visualizing the data
+theme_set(theme_light())
+pixels_gathered %>%
+  filter(instance <= 12) %>%
+  ggplot(aes(x, y, fill = value)) +
+  geom_tile() +
+  facet_grid(label~ instance )
+```
+
+(a)
+```{r}
+##############################################
+##### Visualizing the PCA decomposition  #####
+##############################################
+pca = princomp(first_10k_samples)$scores[,1:2]
+pca_plot = tibble(x = pca[,1], y =pca[,2], labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = pca_plot) + geom_text() + 
+  xlab('PCA component 1') +ylab('PCA component 2')
+
+```
+
+(b)
+```{r}
+##############################################
+#####     Running the TSNE emebdding     #####
+##############################################
+itercost = c()
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 5, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+
+
+(c)
+As the value of perplexity increases, I can see the distances between clusters also increase, which means the clusters become more dispersed.
+
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 20, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 60, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 100, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 125, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 160, 
+                  theta = 0.5, 
+                  eta = 200,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+(e)
+When perplexity is as large as 5000, the clusters will become very dispersed. 
+
+(f)
+The optimal perplexity is 160.
+```{r}
+plot(c(5,20,60,100,125,160),itercost,type='l',xlab='perplexity',ylab='KL Divergence')
+```
+
+(e)
+Here we run eta=10 and eta=100 at perplexity=160. (since eta=200 is run before). I notice that bigger learning rate will lead to more dispersed clustering result.
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 160, 
+                  theta = 0.5, 
+                  eta = 10,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+```{r}
+embedding = Rtsne(X = first_10k_samples, dims = 2, 
+                  perplexity = 160, 
+                  theta = 0.5, 
+                  eta = 100,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 500)
+itercost = c(itercost,embedding$itercosts[10])
+# Visualizing TSNE output
+embedding_plot = tibble(x = embedding$Y[,1], y = embedding$Y[,2], 
+                        labels = as.character(first_10k_samples_labels))
+ggplot(aes(x = x, y=y,label = labels, color = labels), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')
+```
+
+
+
+
+
+
+

@@ -1,0 +1,328 @@
+---
+title: "Assignment3-Part2"
+author: "Mengtong Zhang"
+date: "4/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 3
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(wordVectors)
+library(Rtsne)
+library(tidytext)
+library(tidyverse)
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+if (!file.exists("cookbooks.zip")) {
+  download.file("http://archive.lib.msu.edu/dinfo/feedingamerica/cookbook_text.zip","cookbooks.zip")
+}
+unzip("cookbooks.zip",exdir="cookbooks")
+if (!file.exists("cookbooks.txt")) prep_word2vec(origin="cookbooks",destination="cookbooks.txt",lowercase=T,bundle_ngrams=1)
+
+# Training a Word2Vec model
+if (!file.exists("cookbook_vectors.bin")) {
+  model = train_word2vec("cookbooks.txt","cookbook_vectors.bin",
+                         vectors=100,threads=4,window=6,
+                         min_count = 10,
+                         iter=5,negative_samples=15)
+} else{
+    model = read.vectors("cookbook_vectors.bin")
+    }
+```
+
+1.\
+To improve the quality of embedding, I would do stop words removal, stemming or lemmatization and text normalization.
+
+2.\
+I choose 'salt','pepper' and 'garlic' as three ingresients. And pepper, salt, cayenne, garlic and maca are top 5 similar ingredients.
+```{r}
+# -- Select ingredient and cuisine --
+ingredient = 'salt'
+ingredient_2 = 'pepper'
+ingredient_3 = 'garlic'
+list_of_ingredients = c(ingredient, ingredient_2, ingredient_3)
+# Set of closest words to "sage", "thyme","basil"
+model %>% closest_to(model[[list_of_ingredients]],5)
+```
+
+
+3.\
+Here we use t-SNE to see the relationships between set of words related with the three ingredients in question2.
+```{r}
+n_words = 100
+closest_ingredients = closest_to(model,model[[list_of_ingredients]], n_words)$word
+surrounding_ingredients = model[[closest_ingredients,average=F]]
+plot(surrounding_ingredients,method="pca")
+embedding = Rtsne(X = surrounding_ingredients, dims = 2, 
+                  perplexity = 4, 
+                  theta = 0.5, 
+                  eta = 10,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 2000)
+embedding_vals = embedding$Y
+rownames(embedding_vals) = rownames(surrounding_ingredients)
+```
+
+```{r}
+embedding_vals = embedding$Y
+rownames(embedding_vals) = rownames(surrounding_ingredients)
+set.seed(10)
+n_centers = 3
+clustering = kmeans(embedding_vals,centers=n_centers,
+                    iter.max = 5)
+
+# Setting up data for plotting
+embedding_plot = tibble(x = embedding$Y[,1], 
+                        y = embedding$Y[,2],
+                        labels = rownames(surrounding_ingredients)) %>% 
+  bind_cols(cluster = as.character(clustering$cluster))
+
+# Visualizing TSNE output
+ggplot(aes(x = x, y=y,label = labels, color = cluster), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')+theme(legend.position = 'none')
+
+# Topics produced by the top 3 words
+sapply(sample(1:n_centers,n_centers),function(n) {
+  names(clustering$cluster[clustering$cluster==n][1:10])
+})
+
+```
+
+4.\
+Here I replace three ingredients by three tastes: 'sweet', 'sour' and 'bitter'.
+```{r}
+list_of_ingredients = c('salty','sour','bitter')
+closest_ingredients = closest_to(model,model[[list_of_ingredients]], 50)$word
+surrounding_ingredients = model[[closest_ingredients,average=F]]
+plot(surrounding_ingredients,method="pca")
+```
+
+Not quite make sense. Because there are supposed to be 3 obvious different clusters. Then we perform t-SNE.
+
+```{r}
+embedding = Rtsne(X = surrounding_ingredients, dims = 2, 
+                  perplexity = 4, 
+                  theta = 0.5, 
+                  eta = 10,
+                  pca = TRUE, verbose = TRUE, 
+                  max_iter = 2000)
+embedding_vals = embedding$Y
+rownames(embedding_vals) = rownames(surrounding_ingredients)
+set.seed(10)
+n_centers = 3
+clustering = kmeans(embedding_vals,centers=n_centers,
+                    iter.max = 5)
+
+# Setting up data for plotting
+embedding_plot = tibble(x = embedding$Y[,1], 
+                        y = embedding$Y[,2],
+                        labels = rownames(surrounding_ingredients)) %>% 
+  bind_cols(cluster = as.character(clustering$cluster))
+
+# Visualizing TSNE output
+ggplot(aes(x = x, y=y,label = labels, color = cluster), data = embedding_plot) + 
+  geom_text() +xlab('tSNE dimension 1') +ylab('tSNE dimension 2"')+theme(legend.position = 'none')
+
+# Topics produced by the top 3 words
+sapply(sample(1:n_centers,n_centers),function(n) {
+  names(clustering$cluster[clustering$cluster==3][1:10])
+})
+
+```
+
+
+5.\
+```{r}
+top_evaluative_words = model %>% 
+  closest_to(~ "scrambled"+"benedict",n=30)
+goodness = model %>% 
+  closest_to(~ "scrambled"-"benedict",n=Inf) 
+taste = model %>% 
+  closest_to(~ "muffin" + "butter", n=Inf)
+
+top_evaluative_words %>%
+  inner_join(goodness) %>%
+  inner_join(taste) %>%
+  ggplot() + 
+  geom_text(aes(x=`similarity to "scrambled" + "benedict"`,
+                y=`similarity to "muffin" + "butter"`,
+                label=word))
+
+```
+
+6.\
+I found that:\
+-- belmont has no obvious relation with scrambled+benedict and muffin+butter\
+-- pouched has obvious relation with scrambled+benedict, which is interesting and quite make sense for me because usually egg benedict goes with pouched egg\
+-- duxelles has relatively obvious relation with muffin+butter, which probably because it usually goes with butter\
+
+
+
+
+7.\
+Here we need the package ngram.
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ngram)
+text = readLines('/Users/zmt/Desktop/cookbooks.txt')
+txt = ''
+for (i in text){txt = concatenate(txt,i)}
+```
+
+
+```{r}
+txt = preprocess (txt ,case ="lower", remove.punct = TRUE )
+```
+
+```{r}
+ng <- ngram (txt , n =2)
+```
+
+The list is as shown below:
+
+```{r}
+cat('Top ten are','\n')
+get.phrasetable(ng)[1:10,]
+```
+
+
+## Question 4
+#### Part1
+1. Here we choose $\theta=1$ for the first fitting process.
+```{r}
+dat = read.csv('/Users/zmt/Desktop/kernel_regression_1.csv')
+set.seed(129)
+idx = 990:1001
+x_observed = dat$x[-idx]
+f = dat$y[-idx]
+x_prime = dat$x
+K = function(x,x_prime,l){
+  d = sapply(x,FUN=function(x_in)(x_in-x_prime)^2)
+  return(t(exp(-1/(2*l)*d)))
+}
+mu=0
+mu_star=0
+l=10
+K_f = K(x_observed,x_observed,l)
+for (i in 1:dim(K_f)[1]){K_f[i,i]=K_f[i,i]+0.000001}
+K_star = K(x_observed,x_prime,l)
+K_starstar = K(x_prime,x_prime,l)
+mu_star = mu_star + t(K_star)%*%solve(K_f)%*%(f-mu)
+Sigma_star = K_starstar - t(K_star)%*%t(solve(K_f))%*%K_star
+```
+
+
+
+2.
+Note that here we only take the kernel of log likelihood (So it can be positive). 
+$$L(y_1,...,y_n) = \frac{1}{(2\pi)^n|\Sigma|}e^{-(y-\mu)^{T}\Sigma^{-1}(y-\mu)}$$
+$$logLL \propto -log(|\Sigma|)-(y-\mu)^{T}\Sigma^{-1}(y-\mu)$$
+```{r}
+for (ll in c(1,0.1,0.01,0.00001)){
+mu=0
+mu_star=0
+l=ll
+K_f = K(x_observed,x_observed,l)
+# Add little perbutation to make K_f inversable
+for (i in 1:dim(K_f)[1]){K_f[i,i]=K_f[i,i]+0.000001}
+K_star = K(x_observed,x_prime,l)
+K_starstar = K(x_prime,x_prime,l)
+mu_star = mu_star + t(K_star)%*%solve(K_f)%*%(f-mu)
+Sigma_star = K_starstar - t(K_star)%*%t(solve(K_f))%*%K_star
+Sigma_star_test = Sigma_star[idx,idx]
+#for (i in 1:dim(Sigma_star)[1]){Sigma_star[i,i]=Sigma_star[i,i]+1}
+# Here only take the kernel of likelihood
+#logLL = log(dmvnorm(dat$y[idx],mean = mu_star[idx], sigma=Sigma_star_test))
+logLL = -log(det(Sigma_star_test)) - t(dat$y[idx]-mu_star[idx])%*%solve(Sigma_star_test)%*%(dat$y[idx]-mu_star[idx])
+cat('theta=',ll,'Negative Log Likelihood is',-logLL,'\n')}
+```
+
+$\theta=1$ is the best choice.
+
+
+3.
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+plot_gp = tibble(x = x_prime, 
+                 y = mu_star %>% as.vector(),
+                 sd_prime = sqrt(diag(Sigma_star)))
+
+# Plotting values
+ggplot(aes(x = x, y = y), data = plot_gp) + 
+  geom_line()+ 
+  geom_ribbon(aes(ymin = y-sd_prime,ymax = y+sd_prime), alpha = 0.2)+
+  geom_point(aes(x =x , y= y), data = tibble(x = x_observed, y = f), 
+             color = 'red') +
+  xlim(c(-5,5))+ylim(c(-2,2))+
+  coord_fixed(ratio = 1) +ylab('f(x)')
+
+```
+
+
+#### Part 2
+1. 
+```{r}
+dat = read.csv('/Users/zmt/Desktop/kernel_regression_2.csv')
+set.seed(129)
+idx = 990:1001
+x_observed = dat$x[-idx]
+f = dat$z[-idx]
+x_prime = dat$x
+K = function(x,x_prime,l){
+  d = sapply(x,FUN=function(x_in)(x_in-x_prime)^2)
+  return(t(exp(-1/(2*l)*d)))
+}
+mu=0
+mu_star=0
+l=10
+K_f = K(x_observed,x_observed,l)
+for (i in 1:dim(K_f)[1]){K_f[i,i]=K_f[i,i]+0.000001}
+K_star = K(x_observed,x_prime,l)
+K_starstar = K(x_prime,x_prime,l)
+mu_star = mu_star + t(K_star)%*%solve(K_f)%*%(f-mu)
+Sigma_star = K_starstar - t(K_star)%*%t(solve(K_f))%*%K_star
+```
+
+
+2.
+```{r}
+for (ll in c(0.1,0.01,0.00001)){
+mu=0
+mu_star=0
+l=ll
+K_f = K(x_observed,x_observed,l)
+# Add little perbutation to make K_f inversable
+for (i in 1:dim(K_f)[1]){K_f[i,i]=K_f[i,i]+0.000001}
+K_star = K(x_observed,x_prime,l)
+K_starstar = K(x_prime,x_prime,l)
+mu_star = mu_star + t(K_star)%*%solve(K_f)%*%(f-mu)
+Sigma_star = K_starstar - t(K_star)%*%t(solve(K_f))%*%K_star
+Sigma_star_test = Sigma_star[idx,idx]
+logLL = -log(det(Sigma_star_test)) - t(dat$y[idx]-mu_star[idx])%*%solve(Sigma_star_test)%*%(dat$y[idx]-mu_star[idx])
+cat('theta=',ll,'Negative Log Likelihood is',-logLL,'\n')}
+```
+
+$\theta=0.1$ is the best choice.
+
+3.
+```{r}
+plot_gp = tibble(x = x_prime, 
+                 y = mu_star %>% as.vector(),
+                 sd_prime = sqrt(diag(Sigma_star)))
+
+# Plotting values
+ggplot(aes(x = x, y = y), data = plot_gp) + 
+  geom_line()+ 
+  geom_ribbon(aes(ymin = y-sd_prime,ymax = y+sd_prime), alpha = 0.2)+
+  geom_point(aes(x =x , y= y), data = tibble(x = x_observed, y = f), 
+             color = 'red') +
+  xlim(c(-5,5))+ylim(c(-2,2))+
+  coord_fixed(ratio = 1) +ylab('f(x)')
+```
+
